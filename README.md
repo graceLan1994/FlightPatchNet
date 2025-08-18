@@ -9,7 +9,7 @@
 > 🌟 If you find this resource helpful, please consider to star this repository and cite our research:
 
 ```bibtex
-@inproceedings{wang2023timemixer,
+@inproceedings{wu2025flightpatchnet,
   title={FlightPatchNet: Multi-Scale Patch Network with Differential Coding for Flight Trajectory Prediction},
   author={Lan Wu, Xuebin Wang, Ruijuan Chu, Guangyi Liu, Jing Zhang, Linyu Wang},
   booktitle={Proceedings of the 41st Conference on Uncertainty in Artificial Intelligence},
