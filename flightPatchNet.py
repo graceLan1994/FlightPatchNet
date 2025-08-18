@@ -2,13 +2,191 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import reduce
+from einops.layers.torch import Rearrange
 from layers.Embed import DataEmbedding_inverted
-from layers.PatchMixer import PatchEncoder, PredictionHead, PatchDecoder
 from layers.SelfAttention_Family import AttentionLayer, FullAttention
 from layers.Transformer_EncDec import Encoder, EncoderLayer
-from utils.tools import test_params_flop
 
 
+def get_activation(activ):
+    if activ == "relu":
+        return nn.ReLU()
+    elif activ == "gelu":
+        return nn.GELU()
+    elif activ == "leaky_relu":
+        return nn.LeakyReLU()
+    elif activ == "none":
+        return nn.Identity()
+    else:
+        raise ValueError(f"activation:{activ}")
+
+class FeedForward(nn.Module):
+
+    def __init__(
+        self,
+        in_features: int,
+        hid_features: int,
+        activ="gelu",
+        drop: float = 0.0
+    ):
+        super().__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(in_features, hid_features),
+            get_activation(activ),
+            nn.Linear(hid_features, in_features),
+            nn.Dropout(drop))
+    def forward(self, x):
+        x = self.net(x)
+        return x
+
+class MLPBlock(nn.Module):
+
+    def __init__(
+        self,
+        dim,
+        in_features: int,
+        hid_features: int,
+        out_features: int,
+        activ="gelu",
+        drop: float = 0.0,
+        jump_conn='trunc',
+    ):
+        super().__init__()
+        self.dim = dim
+        self.out_features = out_features
+        self.net = nn.Sequential(
+            nn.Linear(in_features, hid_features),
+            get_activation(activ),
+            nn.Linear(hid_features, out_features),
+            nn.Dropout(drop))
+        if jump_conn == "trunc":
+            self.jump_net = nn.Identity()
+        elif jump_conn == 'proj':
+            self.jump_net = nn.Linear(in_features, out_features)
+        else:
+            raise ValueError(f"jump_conn:{jump_conn}")
+
+    def forward(self, x):
+        x = torch.transpose(x, self.dim, -1)
+        # print(x.shape)
+        x = self.jump_net(x)[..., :self.out_features] + self.net(x)
+        x = torch.transpose(x, self.dim, -1)
+        return x
+
+class PatchEncoder(nn.Module):
+
+    def __init__(
+            self,
+            in_len: int,
+            hid_len: int,
+            patch_size: int,
+            hid_pch: int,
+            in_chn: int,
+            norm=None,
+            activ="gelu",
+            drop: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.net = nn.Sequential()
+        patch_num = in_len // patch_size
+        out_chn = in_chn     
+        inter_patch_mlp = MLPBlock(2, patch_num, hid_len, patch_num, activ, drop)
+        if norm == 'bn':
+            norm_class = nn.BatchNorm2d
+        elif norm == 'in':
+            norm_class = nn.InstanceNorm2d
+        else:
+            norm_class = nn.Identity
+        linear = nn.Linear(patch_size, 1)
+        intra_patch_mlp = MLPBlock(3, patch_size, hid_pch, patch_size, activ, drop)
+        self.net.append(Rearrange("b c (l1 l2) -> b c l1 l2", l2=patch_size))
+        self.net.append(norm_class(in_chn))
+        self.net.append(inter_patch_mlp)
+        self.net.append(norm_class(out_chn))
+        self.net.append(intra_patch_mlp)
+        self.net.append(linear)
+        self.net.append(Rearrange("b c l1 1 -> b c l1"))
+
+    def forward(self, x):
+        # b,c,l
+        return self.net(x)
+
+class PatchDecoder(nn.Module):
+
+    def __init__(
+            self,
+            in_len: int,
+            hid_len: int,
+            in_chn: int,
+            patch_size: int,
+            hid_pch: int,
+            norm=None,
+            activ="gelu",
+            drop: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.net = nn.Sequential()
+        patch_num = in_len // patch_size
+        inter_patch_mlp = MLPBlock(2, patch_num, hid_len, patch_num, activ,
+                                   drop)
+        if norm == 'bn':
+            norm_class = nn.BatchNorm2d
+        elif norm == 'in':
+            norm_class = nn.InstanceNorm2d
+        else:
+            norm_class = nn.Identity
+        linear = nn.Linear(1, patch_size)
+        intra_patch_mlp = MLPBlock(3, patch_size, hid_pch, patch_size, activ, drop)
+        self.net.append(Rearrange("b c l1 -> b c l1 1"))
+        self.net.append(linear)
+        self.net.append(norm_class(in_chn))
+        self.net.append(intra_patch_mlp)
+        self.net.append(norm_class(in_chn))
+        self.net.append(inter_patch_mlp)
+        self.net.append(norm_class(in_chn))
+        self.net.append(Rearrange("b c l1 l2 -> b c (l1 l2)"))
+
+    def forward(self, x):
+        # b,c,l
+        return self.net(x)
+
+class PredictionHead(nn.Module):
+    def __init__(self,
+                 in_len,
+                 out_len,
+                 hid_len,
+                 in_chn,
+                 out_chn,
+                 hid_chn,
+                 activ,
+                 drop=0.0) -> None:
+        super().__init__()
+        self.net = nn.Sequential()
+        if in_chn != out_chn:
+            c_jump_conn = "proj"
+        else:
+            c_jump_conn = "trunc"
+        self.net.append(
+            MLPBlock(1,
+                     in_chn,
+                     hid_chn,
+                     out_chn,
+                     activ=activ,
+                     drop=drop,
+                     jump_conn=c_jump_conn))
+        self.net.append(
+            MLPBlock(2,
+                     in_len,
+                     hid_len,
+                     out_len,
+                     activ=activ,
+                     drop=drop,
+                     jump_conn='proj'))
+
+    def forward(self, x):
+        return self.net(x)
+    
 class FlightPatchNet(nn.Module):
     '''
     FlightPatchNet
@@ -123,14 +301,15 @@ class FlightPatchNet(nn.Module):
             x = x - x_last
         preds = []
         channel_enc_out = self.time_embedding(x.permute(0, 2, 1))
-        # [Batch Time d_model]
+        # [B L d_model]
         channel_enc_out, attns = self.global_encoder(channel_enc_out, attn_mask=None)
-        # [Batch Time d_model]
+        # [B L d_model]
         x = self.channel_projection(channel_enc_out).permute(0, 2, 1)
-        # [Batch  channel Time]
+        # [B C L]
 
         last_comp = torch.zeros_like(x)
         decoders = []
+        # patch mixer blocks
         for i in range(len(self.patch_sizes)):
             x_in = x
             x_in = F.pad(x_in, (self.paddings[i], 0), "constant", 0)
@@ -141,41 +320,35 @@ class FlightPatchNet(nn.Module):
             x = x + comp
 
         multi_scale_dec = torch.stack(decoders, dim=0)
-
-        scale_fusion_out, scale_fusion = self.scale_fusion(
-            multi_scale_dec.view(-1, len(self.patch_sizes), self.scale_fusion_dim))
+        K,B,C,L = multi_scale_dec.shape
+       
+       
+        scale_in = multi_scale_dec.permute(1,0,2,3).reshape(B,K,C*L)   
+       
+        scale_fusion_out, scale_attn = self.scale_fusion(scale_in)
+        scale_fusion_out = scale_fusion_out.reshape(B,K,C,L)
+    
 
         # h,b,c*l
-        scale_fusion_out = scale_fusion_out.view(len(self.patch_sizes), -1, self.in_chn, self.in_len)
+        channel_fusion_in = scale_fusion_out.permute(0,2,1,3).reshape(B,C,K*L)
+       
+        channel_fusion_out, chn_attn = self.channel_fusion(channel_fusion_in)
+    
 
-        channel_fusion_out, chn_attn = self.channel_fusion(scale_fusion_out.view(-1, self.in_chn, self.channel_fusion_dim))
-        # B,C,H*L
-        channel_fusion_out = channel_fusion_out.view(len(self.patch_sizes), -1, self.in_chn, self.in_len)
-
-        # 多头预测
+        channel_fusion_out =  channel_fusion_out.reshape(B,C,K,L).permute(2,0,1,3)
+        
+        # multiple predictors
         for i in range(len(self.patch_sizes)):
-            last_comp = last_comp + channel_fusion_out[i, ...].squeeze(0)
+            last_comp = channel_fusion_out[i, ...].squeeze(0)
             pred = self.pred_heads[i](last_comp)
 
             preds.append(pred)
         if self.out_len != 0 and self.out_chn != 0:
 
-            y_pred = reduce(preds, "h b c l -> b c l",self.reduction)
+            y_pred = reduce(preds, "k b c l -> b c l",self.reduction)
             if self.last_norm and self.out_chn == self.in_chn:
                 y_pred += x_last
-
             return y_pred
         else:
             return None
 
-
-
-
-
-if __name__ == '__main__':
-    model = FlightPatchNet(60, 10, 6, 6, [60, 30, 20, 10, 5], 128, 128, 256, 3, 128, 'bn', True,
-                                           'relu', 0.5)
-    x = torch.randn(16, 6, 60)
-    y = model(x)
-    print(y.shape)
-    test_params_flop(model, (6, 60))
