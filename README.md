@@ -15,3 +15,20 @@
   booktitle={Proceedings of the 41st Conference on Uncertainty in Artificial Intelligence},
   year={2025}
 }
+
+
+## Our Further Work
+This work improves the model performance by separetely model horizontal and vertical variables in flight trajectory, and add more experimental anlysis.
+Please refer to this paper.
+1, [**M^2FlightNet: Multi-Scale Modeling Network for Short-Term Flight Trajectory Prediction**]([https://arxiv.org/abs/2502.15016](https://ieeexplore.ieee.org/document/11024155)), in *IEEE TAES* 2025.
+
+
+```bibtex
+@article{ni2025timedistill,
+  title={M^2FlightNet: Multi-Scale Modeling Network for Short-Term Flight Trajectory Prediction},
+  author={Lan Wu; Xuebin Wang; Tianhe Yang; Jing Zhang; Fang Dong; Guangyi Liu;Ruijuan Chu;Linyu Wang},
+  journal={IEEE Transactions on Aerospace and Electronic Systems},
+  year={2025}
+}
+```
+The code of M^2FlightNet will be available soon!
