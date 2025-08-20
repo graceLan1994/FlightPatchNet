@@ -18,7 +18,7 @@
 ```
 
 ## Our Further Work
-This work improves the model performance by separetely model horizontal and vertical variables in flight trajectory, and add more experimental anlysis.
+This work improves the model performance by separetely modeling horizontal and vertical variables in flight trajectory, and adds more experimental anlysis.
 
 Please refer to this paper.
 
