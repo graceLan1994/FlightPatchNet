@@ -22,12 +22,12 @@ This work improves the model performance by separetely model horizontal and vert
 
 Please refer to this paper.
 
-1, [**M^2FlightNet: Multi-Scale Modeling Network for Short-Term Flight Trajectory Prediction**]([https://arxiv.org/abs/2502.15016](https://ieeexplore.ieee.org/document/11024155)), in *IEEE TAES* 2025.
+1, [**$M^2$FlightNet: Multi-Scale Modeling Network for Short-Term Flight Trajectory Prediction**]([https://arxiv.org/abs/2502.15016](https://ieeexplore.ieee.org/document/11024155)), in *IEEE TAES* 2025.
 
 
 ```bibtex
-@article{ni2025timedistill,
-  title={M^2FlightNet: Multi-Scale Modeling Network for Short-Term Flight Trajectory Prediction},
+@article{wu2025m2flightnet,
+  title={$M^2$FlightNet: Multi-Scale Modeling Network for Short-Term Flight Trajectory Prediction},
   author={Lan Wu; Xuebin Wang; Tianhe Yang; Jing Zhang; Fang Dong; Guangyi Liu;Ruijuan Chu;Linyu Wang},
   journal={IEEE Transactions on Aerospace and Electronic Systems},
   year={2025}
